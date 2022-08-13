@@ -1,65 +1,35 @@
 {
+  description =
+    "Sophisticated chroot/build/flash tool to develop and install postmarketOS.";
   inputs = {
-    nixpkgs.url = "nixpkgs";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, ... }:
-    with nixpkgs.lib;
-    let
-      supportedSystems = [ "x86_64-linux" "i686-linux" "aarch64-linux" ];
-      forAllSystems' = systems: fun: nixpkgs.lib.genAttrs systems fun;
-      forAllSystems = forAllSystems' supportedSystems;
-    in
-      {
-        overlays.pmbootstrap =
-          final: prev:
-          {
-            pmbootstrap = final.python3Packages.callPackage ./pmbootstrap.nix {};
-          };
-        
-        overlay = self.overlays.pmbootstrap;
-
-        packages = forAllSystems (system:
-          let
-            pkgs = import nixpkgs
-              { inherit system;
-                overlays = mapAttrsToList (_: id) self.overlays;
+  outputs = { self, nixpkgs, flake-utils, ... }@inputs:
+    flake-utils.lib.eachDefaultSystem (system:
+      let pkgs = nixpkgs.legacyPackages.${system};
+      in rec {
+        packages = flake-utils.lib.flattenTree rec {
+          pmbootstrap = with pkgs.python3Packages;
+            buildPythonApplication rec {
+              pname = "pmbootstrap";
+              version = "1.45.0";
+              src = fetchPypi {
+                inherit pname version;
+                sha256 = "sha256-75ZFzhRsczkwhiUl1upKjSvmqN0RkXaM8cKr4zLgi4w=";
               };
-          in
-            {
-              inherit (pkgs) pmbootstrap;
-            }
-        );
-
-        apps = mapAttrs (_: v:
-          mapAttrs (_: a:
-            {
-              type = "app";
-              program = a;
-            }
-          ) v
-        ) self.packages;
-
-        defaultApp = mapAttrs (_: v:
-          v.pmbootstrap
-        ) self.apps;
-
-
-        devShell = forAllSystems (system:
-          let
-            pkgs = import nixpkgs
-              { inherit system;
-                overlays = mapAttrsToList (_: id) self.overlays;
+              doCheck = false;
+              meta = with pkgs.lib; {
+                inherit description;
+                homepage = "https://www.postmarketos.org/";
+                license = licenses.gpl3Plus;
               };
-          in
-            pkgs.mkShell {
-              nativeBuildInputs = with pkgs;
-                [ (python3.withPackages (pkgs: with pkgs;
-                  [ flake8 ]))
-
-                  openssl git sudo
-                ];
-            }
-        );
-      };
+            };
+        };
+        defaultPackage = packages.pmbootstrap;
+        apps.pmbootstrap =
+          flake-utils.lib.mkApp { drv = packages.pmbootstrap; };
+        defaultApp = apps.pmbootstrap;
+      });
 }
